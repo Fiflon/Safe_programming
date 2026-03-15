@@ -1,3 +1,4 @@
+// g++ main.cpp -o run && ./run
 #include <functional>
 #include <iostream>
 #include <memory>
