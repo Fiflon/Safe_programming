@@ -1,12 +1,15 @@
-// g++ main.cpp -o run && ./run N M
+// g++ main.cpp -o run && ./run N M K
+// 1. ma sie zablokowac (unsafe)
+// 2. wykresy finegrained vs borad - cpu do throughput(X/{czas na X operacji})
+// 2. wykresy finegrained vs borad - cpu do latency
 #include <cassert>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <random>
+#include <string>
 #include <thread>
-#include <tuple>
 #include <vector>
 
 std::mutex L;
@@ -32,7 +35,7 @@ struct Timer {
 void move_broad(int n, int i, int j) {
     L.lock();
     acct[i] -= n;
-    std::cout << n << " ... in transfer \n";
+    std::cerr << n << " ... in transfer from \t" << i << " -> " << j << "\n";
     acct[j] += n;
     L.unlock();
 }
@@ -41,7 +44,7 @@ void move_finegrained_unsafe(int n, int i, int j) {
     Lfine[i]->lock();
     Lfine[j]->lock();
     acct[i] -= n;
-    std::cout << n << " ... in transfer \n";
+    std::cerr << n << " ... in transfer from \t" << i << " -> " << j << "\n";
     acct[j] += n;
     Lfine[i]->unlock();
     Lfine[j]->unlock();
@@ -53,7 +56,7 @@ void move_finegrained_safe(int n, int i, int j) {
     Lfine[mi]->lock();
     Lfine[ma]->lock();
     acct[i] -= n;
-    std::cout << n << " ... in transfer \n";
+    std::cerr << n << " ... in transfer from \t" << i << " -> " << j << "\n";
     acct[j] += n;
     Lfine[ma]->unlock();
     Lfine[mi]->unlock();
@@ -79,29 +82,48 @@ void move_couple(int id, int transfers_count, int account_range, std::function<v
 int main(int argc, char** argv) {
     int n = std::stoi(argv[1]);
     int m = std::stoi(argv[2]);
+    int k = std::stoi(argv[3]);
+    std::string type = argv[4];
     if (argc < 3 ) {
-        std::cout << "Usage: program [N threads] [M accounts]\n";
+        std::cout << "Usage: program [N threads] [M accounts] [K transfers]\n";
         return 0;
     }
 
     acct = std::vector<int>(m, 0);
     Lfine = std::vector<std::unique_ptr<std::mutex>>(m);
 
+    std::function<void(int, int, int)> func;
+    if (type == "safe") {
+        func = move_finegrained_safe;
+    }else if (type == "unsafe") {
+        func = move_finegrained_unsafe;
+    }else if (type == "broad") {
+        func = move_broad;
+    }else {
+        std::cout << "Wrong move type\n";
+        return 0;
+    }
+    if (k % n != 0) {
+        std::cout << "SOME TRANSFERS WILL BE LOST!\n";
+    }
     for (auto& l : Lfine) {
         l = std::make_unique<std::mutex>();
     }
     std::vector<std::unique_ptr<std::thread> > threads;
-    for (int i = 0; i < n; i++) {
-        threads.emplace_back(std::make_unique<std::thread>(
-            move_couple,
-            i,
-            100,
-            m,
-            move_finegrained_safe
-        ));
-    }
-    for (auto& t : threads) {
-        t->join();
+    {
+        Timer timer("Time it took for " + type + ":\t");
+        for (int i = 0; i < n; i++) {
+            threads.emplace_back(std::make_unique<std::thread>(
+                move_couple,
+                i, //id
+                k / n, //number of transfers
+                m, //number of accounts
+                func
+            ));
+        }
+        for (auto& t : threads) {
+            t->join();
+        }
     }
     int sum = std::reduce(std::begin(acct), std::end(acct));
     assert(sum == 0);
