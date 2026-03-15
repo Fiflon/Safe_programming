@@ -19,7 +19,7 @@ void move_broad(int n, int i, int j) {
     acct[j] += n;
     L.unlock();
 }
-void move_finegrained(int n, int i, int j) {
+void move_finegrained_unsafe(int n, int i, int j) {
     Lfine[i]->lock();
     Lfine[j]->lock();
     acct[i] -= n;
@@ -50,6 +50,9 @@ void move_couple(int id, int transfers_count, std::function<void(int, int, int)>
     for (int i = 0; i < transfers_count; i++) {
         int a = dist(gen);
         int b = dist(gen);
+        while (b == a) {
+            b = dist(gen);
+        }
         int amount = transferred(gen);
         move_func(amount, a, b);
     }
