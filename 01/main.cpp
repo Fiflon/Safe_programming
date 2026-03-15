@@ -16,6 +16,8 @@ std::mutex L;
 std::vector<int> acct;
 std::vector<std::unique_ptr<std::mutex>> Lfine;
 
+#define SLEEP true
+
 struct Timer {
     std::chrono::high_resolution_clock::time_point start;
 
@@ -32,20 +34,34 @@ struct Timer {
     }
 };
 
-void move_broad(int n, int i, int j) {
-    L.lock();
+void random_sleep(int min_ms, int max_ms) {
+    static thread_local std::mt19937 gen(std::random_device{}());
+    std::uniform_int_distribution<int> dist(min_ms, max_ms);
+
+    int duration = dist(gen);
+    std::this_thread::sleep_for(std::chrono::milliseconds(duration));
+}
+
+
+void work(int n, int i, int j) {
     acct[i] -= n;
     std::cerr << n << " ... in transfer from \t" << i << " -> " << j << "\n";
     acct[j] += n;
+    if (SLEEP) {
+        random_sleep(1, 10); 
+    }
+}
+
+void move_broad(int n, int i, int j) {
+    L.lock();
+    work(n, i, j);
     L.unlock();
 }
 
 void move_finegrained_unsafe(int n, int i, int j) {
     Lfine[i]->lock();
     Lfine[j]->lock();
-    acct[i] -= n;
-    std::cerr << n << " ... in transfer from \t" << i << " -> " << j << "\n";
-    acct[j] += n;
+    work(n, i, j);
     Lfine[i]->unlock();
     Lfine[j]->unlock();
 }
@@ -55,9 +71,7 @@ void move_finegrained_safe(int n, int i, int j) {
     int ma = std::max(i, j);
     Lfine[mi]->lock();
     Lfine[ma]->lock();
-    acct[i] -= n;
-    std::cerr << n << " ... in transfer from \t" << i << " -> " << j << "\n";
-    acct[j] += n;
+    work(n, i, j);
     Lfine[ma]->unlock();
     Lfine[mi]->unlock();
 }
