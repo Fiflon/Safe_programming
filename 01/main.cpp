@@ -6,11 +6,28 @@
 #include <mutex>
 #include <random>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 std::mutex L;
 std::vector<int> acct;
 std::vector<std::unique_ptr<std::mutex>> Lfine;
+
+struct Timer {
+    std::chrono::high_resolution_clock::time_point start;
+
+    std::string msg;
+    Timer(std::string msg = "") {
+        this->msg = msg;
+        start = std::chrono::high_resolution_clock::now();
+    }
+
+    ~Timer() {
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        std::cout << msg << "Execution time: " << duration.count() << " ms\n";
+    }
+};
 
 void move_broad(int n, int i, int j) {
     L.lock();
@@ -19,14 +36,15 @@ void move_broad(int n, int i, int j) {
     acct[j] += n;
     L.unlock();
 }
+
 void move_finegrained_unsafe(int n, int i, int j) {
     Lfine[i]->lock();
     Lfine[j]->lock();
     acct[i] -= n;
     std::cout << n << " ... in transfer \n";
     acct[j] += n;
-    Lfine[i]->lock();
-    Lfine[j]->lock();
+    Lfine[i]->unlock();
+    Lfine[j]->unlock();
 }
 
 void move_finegrained_safe(int n, int i, int j) {
