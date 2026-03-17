@@ -106,9 +106,9 @@ def main() -> None:
 		y_mean_col="throughput_mean",
 		y_std_col="throughput_std",
 		title="Throughput vs Threads (safe vs broad)",
-		y_label="Throughput [ops/s]",
+		y_label="Throughput [Mops/s]",
 		output_path=throughput_path,
-		# scale=1_000_000.0,
+		scale=1_000_000.0,
 	)
 
 	plot_metric(
