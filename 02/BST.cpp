@@ -7,14 +7,21 @@ struct Leaf {
     explicit Leaf(int inputValue) : value(inputValue) {}
 };
 
+enum class eStatus {
+    Idle,
+    Flagged,
+    Marked
+};
+
 struct ComperableNode {
     using Child = std::variant<std::nullptr_t, ComperableNode*, Leaf*>;
 
+    eStatus status;
     int value;
     Child left;
     Child right;
 
-    explicit ComperableNode(int inputValue) : value(inputValue), left(nullptr), right(nullptr) {}
+    explicit ComperableNode(int inputValue) : value(inputValue), left(nullptr), right(nullptr), status(eStatus::Idle) {}
 };
 
 
@@ -22,8 +29,19 @@ class BST {
 private:
     ComperableNode* root;
 
+    bool isNull(const ComperableNode::Child& childSlot) const {
+        return std::holds_alternative<std::nullptr_t>(childSlot);
+    }
+
+    bool isLeaf(const ComperableNode::Child& childSlot) const {
+        return std::holds_alternative<Leaf*>(childSlot);
+    }
+
+    bool isNode(const ComperableNode::Child& childSlot) const {
+        return std::holds_alternative<ComperableNode*>(childSlot);
+    }
     void insertIntoChild(ComperableNode::Child& childSlot, int value) {
-        if (std::holds_alternative<std::nullptr_t>(childSlot)) {
+        if (isNull(childSlot)) {
             childSlot = new Leaf(value);
             return;
         }
@@ -58,7 +76,7 @@ private:
     }
 
     bool searchInChild(const ComperableNode::Child& childSlot, int value) const {
-        if (std::holds_alternative<std::nullptr_t>(childSlot)) {
+        if (isNull(childSlot)) {
             return false;
         }
 
@@ -86,7 +104,7 @@ private:
     }
 
     void inOrderChild(const ComperableNode::Child& childSlot) const {
-        if (std::holds_alternative<std::nullptr_t>(childSlot)) {
+        if (isNull(childSlot)) {
             return;
         }
 
