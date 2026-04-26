@@ -1,85 +1,151 @@
 #include <iostream>
+#include <variant>
 
-struct Node {
-    int data;
-    Node* left;
-    Node* right;
+struct Leaf {
+    int value;
 
-    Node(int value) {
-        data = value;
-        left = nullptr;
-        right = nullptr;
-    }
+    explicit Leaf(int inputValue) : value(inputValue) {}
 };
+
+struct ComperableNode {
+    using Child = std::variant<std::nullptr_t, ComperableNode*, Leaf*>;
+
+    int value;
+    Child left;
+    Child right;
+
+    explicit ComperableNode(int inputValue) : value(inputValue), left(nullptr), right(nullptr) {}
+};
+
 
 class BST {
 private:
-    Node* root;
+    ComperableNode* root;
 
-    Node* insertHelper(Node* node, int value) {
-        if (node == nullptr) {
-            return new Node(value);
+    void insertIntoChild(ComperableNode::Child& childSlot, int value) {
+        if (std::holds_alternative<std::nullptr_t>(childSlot)) {
+            childSlot = new Leaf(value);
+            return;
         }
 
-        if (value < node->data) {
-            node->left = insertHelper(node->left, value);
-        } else if (value > node->data) {
-            node->right = insertHelper(node->right, value);
+        if (auto nextNode = std::get_if<ComperableNode*>(&childSlot)) {
+            insertHelper(*nextNode, value);
+            return;
         }
 
-        return node;
+        Leaf* leaf = std::get<Leaf*>(childSlot);
+        if (leaf->value == value) {
+            return;
+        }
+
+        ComperableNode* promotedNode = new ComperableNode(leaf->value);
+        if (value < promotedNode->value) {
+            promotedNode->left = new Leaf(value);
+        } else {
+            promotedNode->right = new Leaf(value);
+        }
+
+        delete leaf;
+        childSlot = promotedNode;
     }
 
-    bool searchHelper(Node* node, int value) {
+    void insertHelper(ComperableNode* node, int value) {
+        if (value < node->value) {
+            insertIntoChild(node->left, value);
+        } else if (value > node->value) {
+            insertIntoChild(node->right, value);
+        }
+    }
+
+    bool searchInChild(const ComperableNode::Child& childSlot, int value) const {
+        if (std::holds_alternative<std::nullptr_t>(childSlot)) {
+            return false;
+        }
+
+        if (const auto nextNode = std::get_if<ComperableNode*>(&childSlot)) {
+            return searchHelper(*nextNode, value);
+        }
+
+        const Leaf* leaf = std::get<Leaf*>(childSlot);
+        return leaf->value == value;
+    }
+
+    bool searchHelper(const ComperableNode* node, int value) const {
         if (node == nullptr) {
             return false;
         }
-        if (node->data == value) {
+        if (node->value == value) {
             return true;
         }
 
-        if (node->data < value) {
-            return searchHelper(node->right, value);
+        if (value < node->value) {
+            return searchInChild(node->left, value);
         }
 
-        return searchHelper(node->left, value);
+        return searchInChild(node->right, value);
     }
 
-    void inorderHelper(Node* node) {
+    void inOrderChild(const ComperableNode::Child& childSlot) const {
+        if (std::holds_alternative<std::nullptr_t>(childSlot)) {
+            return;
+        }
+
+        if (const auto nextNode = std::get_if<ComperableNode*>(&childSlot)) {
+            inOrderHelper(*nextNode);
+            return;
+        }
+
+        std::cout << std::get<Leaf*>(childSlot)->value << " ";
+    }
+
+    void inOrderHelper(const ComperableNode* node) const {
         if (node != nullptr) {
-            inorderHelper(node->left);
-            std::cout << node->data << " ";
-            inorderHelper(node->right);
+            inOrderChild(node->left);
+            std::cout << node->value << " ";
+            inOrderChild(node->right);
         }
     }
 
-    void destroyTree(Node* node) {
+    void destroyChild(ComperableNode::Child& childSlot) {
+        if (auto nextNode = std::get_if<ComperableNode*>(&childSlot)) {
+            destroyTree(*nextNode);
+        } else if (auto leaf = std::get_if<Leaf*>(&childSlot)) {
+            delete *leaf;
+        }
+
+        childSlot = nullptr;
+    }
+
+    void destroyTree(ComperableNode* node) {
         if (node != nullptr) {
-            destroyTree(node->left);
-            destroyTree(node->right);
+            destroyChild(node->left);
+            destroyChild(node->right);
             delete node;
         }
     }
 
 public:
-    BST() {
-        root = nullptr;
-    }
+    BST() : root(nullptr) {}
 
     ~BST() {
         destroyTree(root);
     }
 
     void insert(int value) {
-        root = insertHelper(root, value);
+        if (root == nullptr) {
+            root = new ComperableNode(value);
+            return;
+        }
+
+        insertHelper(root, value);
     }
 
-    bool search(int value) {
+    bool search(int value) const {
         return searchHelper(root, value);
     }
 
-    void inorder() {
-        inorderHelper(root);
+    void inorder() const {
+        inOrderHelper(root);
         std::cout << "\n";
     }
 };
