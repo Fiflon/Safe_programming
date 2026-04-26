@@ -38,14 +38,11 @@ private:
         }
 
         Leaf* leaf = std::get<Leaf*>(slot);
-
         if (leaf->value == value)
             return;
 
         int existing = leaf->value;
-
         int split = std::max(existing, value);
-
         InternalNode* newNode = new InternalNode(split);
 
         if (value < existing) {
@@ -63,7 +60,6 @@ private:
     bool searchChild(const Child& slot, int value) const {
         if (std::holds_alternative<std::nullptr_t>(slot))
             return false;
-
         if (auto node = std::get_if<InternalNode*>(&slot)) {
             if (value < (*node)->splitKey)
                 return searchChild((*node)->left, value);
@@ -83,7 +79,6 @@ private:
             inorderChild((*node)->right);
             return;
         }
-
         std::cout << std::get<Leaf*>(slot)->value << " ";
     }
 
@@ -96,9 +91,9 @@ private:
         else if (auto leaf = std::get_if<Leaf*>(&slot)) {
             delete *leaf;
         }
-
         slot = nullptr;
     }
+    // piekny vibe code pls don't touch
     void  printChild(const Child& slot,
                     const std::string& prefix,
                     bool isLeft) const {
@@ -159,7 +154,7 @@ int main() {
     tree.insert(60);
     tree.insert(80);
 
-    tree.inorder();  // prints sorted values
+    tree.inorder();
 
     std::cout << "40: " << (tree.search(40) ? "yes" : "no") << "\n";
     std::cout << "90: " << (tree.search(90) ? "yes" : "no") << "\n";
