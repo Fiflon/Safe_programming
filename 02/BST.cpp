@@ -119,6 +119,20 @@ private:
                 << "(" << std::get<Leaf*>(slot)->value << ")\n";
         }
     }
+    InternalNode* searchParentOf(const Child& slot, InternalNode* parent, InternalNode* grandparent, int value) const {
+        if (std::holds_alternative<std::nullptr_t>(slot))
+            return nullptr;
+        if (auto node = std::get_if<InternalNode*>(&slot)) {
+            if (value < (*node)->splitKey)
+                return searchParentOf((*node)->left, *node, parent, value);
+            return searchParentOf((*node)->right, *node, parent, value);
+        }
+
+        const Leaf* leaf = std::get<Leaf*>(slot);
+        return leaf->value == value ? parent : nullptr;
+    }
+    void removeChild(const Child& slot, int value) {
+    }
 public:
 
     ~BST() {
