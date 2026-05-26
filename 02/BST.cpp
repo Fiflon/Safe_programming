@@ -29,6 +29,7 @@
 //
 // Memory reclamation is intentionally omitted (proof of concept).
 
+#include <algorithm>
 #include <atomic>
 #include <barrier>
 #include <cassert>
@@ -358,8 +359,12 @@ void concurrentStress() {
 
     LockFreeBST tree;
 
-    // Pre-populate so the tree has structure to fight over.
-    for (int k = 0; k < KEY_SPACE; k += 2) tree.insert(k);
+    // Shuffle keys to avoid degenerate linear tree.
+    std::vector<int> keys;
+    for (int k = 0; k < KEY_SPACE; k += 2) keys.push_back(k);
+    std::mt19937 prepopRng(42);
+    std::shuffle(keys.begin(), keys.end(), prepopRng);
+    for (int k : keys) tree.insert(k);
 
     std::barrier sync(THREADS);
     std::vector<std::thread> ts;
@@ -405,7 +410,11 @@ void concurrentStress() {
 
 void runBenchmark(int threads, int opsPerThread, int keySpace) {
     LockFreeBST tree;
-    for (int k = 0; k < keySpace; k += 2) tree.insert(k);
+    std::vector<int> keys;
+    for (int k = 0; k < keySpace; k += 2) keys.push_back(k);
+    std::mt19937 prepopRng(42);
+    std::shuffle(keys.begin(), keys.end(), prepopRng);
+    for (int k : keys) tree.insert(k);
 
     std::barrier sync(threads);
     std::vector<std::thread> ts;

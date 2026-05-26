@@ -4,6 +4,7 @@
 //
 // Build: g++ -std=c++20 -pthread -O2 singleLockBST.cpp -o singleLockBST
 
+#include <algorithm>
 #include <barrier>
 #include <cassert>
 #include <chrono>
@@ -121,7 +122,12 @@ void concurrentStress() {
     constexpr int KEY_SPACE = 2000;
 
     SingleLockBST tree;
-    for (int k = 0; k < KEY_SPACE; k += 2) tree.insert(k);
+    // Shuffle keys to avoid degenerate linear tree (sequential insert → O(n) depth).
+    std::vector<int> keys;
+    for (int k = 0; k < KEY_SPACE; k += 2) keys.push_back(k);
+    std::mt19937 prepopRng(42);
+    std::shuffle(keys.begin(), keys.end(), prepopRng);
+    for (int k : keys) tree.insert(k);
 
     std::barrier sync(THREADS);
     std::vector<std::thread> ts;
@@ -169,7 +175,11 @@ void concurrentStress() {
 
 void runBenchmark(int threads, int opsPerThread, int keySpace) {
     SingleLockBST tree;
-    for (int k = 0; k < keySpace; k += 2) tree.insert(k);
+    std::vector<int> keys;
+    for (int k = 0; k < keySpace; k += 2) keys.push_back(k);
+    std::mt19937 prepopRng(42);
+    std::shuffle(keys.begin(), keys.end(), prepopRng);
+    for (int k : keys) tree.insert(k);
 
     std::barrier sync(threads);
     std::vector<std::thread> ts;
