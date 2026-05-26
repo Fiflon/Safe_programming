@@ -32,8 +32,10 @@
 #include <atomic>
 #include <barrier>
 #include <cassert>
+#include <chrono>
 #include <climits>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <mutex>
 #include <random>
@@ -99,7 +101,7 @@ struct InternalNode;
 // Info records (one per in-flight update)
 // ---------------------------------------------------------------------------
 
-struct Info { virtual ~Info() = default; };
+struct alignas(4) Info { virtual ~Info() = default; };
 
 struct InsertInfo : Info {
     InternalNode* p;             // parent that will be flagged
@@ -113,6 +115,13 @@ struct DeleteInfo : Info {
     Node*         l;             // leaf carrying the key to delete
     uintptr_t     pupdate;       // observed value of p->update at search time
 };
+
+static_assert(alignof(Info) >= 4,
+              "Info must provide at least 2 free low bits for tagged pointers");
+static_assert((alignof(InsertInfo) & uintptr_t(0x3)) == 0,
+              "InsertInfo alignment must keep low tag bits clear");
+static_assert((alignof(DeleteInfo) & uintptr_t(0x3)) == 0,
+              "DeleteInfo alignment must keep low tag bits clear");
 
 // ---------------------------------------------------------------------------
 // Tagged pointer helpers (low 2 bits of update store the state)
@@ -360,14 +369,14 @@ void concurrentStress() {
         ts.emplace_back([&, tid] {
             std::mt19937 rng(0xC0FFEE ^ tid);
             std::uniform_int_distribution<int> keyD(0, KEY_SPACE - 1);
-            std::uniform_int_distribution<int> opD(0, 2);
+            std::uniform_int_distribution<int> opD(0, 3);
             sync.arrive_and_wait();
             for (int i = 0; i < OPS; ++i) {
                 int k = keyD(rng);
                 switch (opD(rng)) {
                     case 0: ins  += tree.insert(k);                 break;
                     case 1: del  += tree.remove(k);                 break;
-                    default:
+                    default:  // cases 2,3 → 50% reads
                         if (tree.contains(k)) ++found; else ++miss; break;
                 }
             }
@@ -390,9 +399,62 @@ void concurrentStress() {
 
 } // namespace test
 
-int main() {
-    test::singleThreadedSanity();
-    test::concurrentStress();
+// ===========================================================================
+// Benchmark harness
+// ===========================================================================
+
+void runBenchmark(int threads, int opsPerThread, int keySpace) {
+    LockFreeBST tree;
+    for (int k = 0; k < keySpace; k += 2) tree.insert(k);
+
+    std::barrier sync(threads);
+    std::vector<std::thread> ts;
+    std::atomic<long> ins{0}, del{0}, found{0}, miss{0};
+
+    auto t0 = std::chrono::steady_clock::now();
+
+    for (int tid = 0; tid < threads; ++tid) {
+        ts.emplace_back([&, tid] {
+            std::mt19937 rng(0xC0FFEE ^ tid);
+            std::uniform_int_distribution<int> keyD(0, keySpace - 1);
+            std::uniform_int_distribution<int> opD(0, 3);
+            sync.arrive_and_wait();
+            for (int i = 0; i < opsPerThread; ++i) {
+                int k = keyD(rng);
+                switch (opD(rng)) {
+                    case 0: ins  += tree.insert(k);                 break;
+                    case 1: del  += tree.remove(k);                 break;
+                    default:  // cases 2,3 → 50% reads
+                        if (tree.contains(k)) ++found; else ++miss; break;
+                }
+            }
+        });
+    }
+    for (auto& t : ts) t.join();
+
+    auto t1 = std::chrono::steady_clock::now();
+    long totalOps = (long)threads * opsPerThread;
+    double us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+    double throughput = totalOps / (us / 1e6);
+
+    std::cout << "variant=lockFree"
+              << " threads=" << threads
+              << " total_ops=" << totalOps
+              << " time_us=" << (long)us
+              << " throughput_ops_s=" << throughput
+              << "\n";
+}
+
+int main(int argc, char* argv[]) {
+    if (argc >= 2 && std::string(argv[1]) == "benchmark") {
+        int threads     = argc >= 3 ? std::atoi(argv[2]) : 4;
+        int opsPerThread = argc >= 4 ? std::atoi(argv[3]) : 50000;
+        int keySpace    = argc >= 5 ? std::atoi(argv[4]) : 2000;
+        runBenchmark(threads, opsPerThread, keySpace);
+    } else {
+        test::singleThreadedSanity();
+        test::concurrentStress();
+    }
     return 0;
 }
 
