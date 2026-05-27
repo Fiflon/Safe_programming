@@ -18,6 +18,17 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
+// Simulated work
+// ---------------------------------------------------------------------------
+static volatile int workSink = 0;
+
+static void simulateWork(int iters) {
+    int x = 1;
+    for (int i = 0; i < iters; ++i) x = x * 7 + i;
+    workSink = x;
+}
+
+// ---------------------------------------------------------------------------
 // Node
 // ---------------------------------------------------------------------------
 
@@ -54,6 +65,29 @@ public:
 
         while (true) {
             if (key == cur->key) { cur->mtx.unlock(); return true; }
+            Node* next = (key < cur->key) ? cur->left : cur->right;
+            if (!next) { cur->mtx.unlock(); return false; }
+            next->mtx.lock();
+            cur->mtx.unlock();
+            cur = next;
+        }
+    }
+
+    // contains with simulated work under LEAF lock only.
+    bool containsWork(int key, int workIters) {
+        sentinel_.mtx.lock();
+        Node* cur = (key < sentinel_.key) ? sentinel_.left : sentinel_.right;
+        if (!cur) { sentinel_.mtx.unlock(); return false; }
+
+        cur->mtx.lock();
+        sentinel_.mtx.unlock();
+
+        while (true) {
+            if (key == cur->key) {
+                simulateWork(workIters);  // work under LEAF lock only!
+                cur->mtx.unlock();
+                return true;
+            }
             Node* next = (key < cur->key) ? cur->left : cur->right;
             if (!next) { cur->mtx.unlock(); return false; }
             next->mtx.lock();
@@ -226,7 +260,7 @@ void concurrentStress() {
         ts.emplace_back([&, tid] {
             std::mt19937 rng(0xC0FFEE ^ tid);
             std::uniform_int_distribution<int> keyD(0, KEY_SPACE - 1);
-            std::uniform_int_distribution<int> opD(0, 3);
+            std::uniform_int_distribution<int> opD(0, 5);
             sync.arrive_and_wait();
             for (int i = 0; i < OPS; ++i) {
                 int k = keyD(rng);
@@ -260,7 +294,7 @@ void concurrentStress() {
 // Benchmark harness
 // ===========================================================================
 
-void runBenchmark(int threads, int opsPerThread, int keySpace) {
+void runBenchmark(int threads, int opsPerThread, int keySpace, int workIters) {
     HandOverBST tree;
     std::vector<int> keys;
     for (int k = 0; k < keySpace; k += 2) keys.push_back(k);
@@ -278,15 +312,15 @@ void runBenchmark(int threads, int opsPerThread, int keySpace) {
         ts.emplace_back([&, tid] {
             std::mt19937 rng(0xC0FFEE ^ tid);
             std::uniform_int_distribution<int> keyD(0, keySpace - 1);
-            std::uniform_int_distribution<int> opD(0, 3);
+            std::uniform_int_distribution<int> opD(0, 5);
             sync.arrive_and_wait();
             for (int i = 0; i < opsPerThread; ++i) {
                 int k = keyD(rng);
                 switch (opD(rng)) {
                     case 0: ins  += tree.insert(k);                 break;
                     case 1: del  += tree.remove(k);                 break;
-                    default:  // cases 2,3 → 50% reads
-                        if (tree.contains(k)) ++found; else ++miss; break;
+                    default:
+                        if (tree.containsWork(k, workIters)) ++found; else ++miss; break;
                 }
             }
         });
@@ -311,7 +345,8 @@ int main(int argc, char* argv[]) {
         int threads     = argc >= 3 ? std::atoi(argv[2]) : 4;
         int opsPerThread = argc >= 4 ? std::atoi(argv[3]) : 50000;
         int keySpace    = argc >= 5 ? std::atoi(argv[4]) : 2000;
-        runBenchmark(threads, opsPerThread, keySpace);
+        int workIters   = argc >= 6 ? std::atoi(argv[5]) : 0;
+        runBenchmark(threads, opsPerThread, keySpace, workIters);
     } else {
         test::singleThreadedSanity();
         test::concurrentStress();

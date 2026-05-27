@@ -5,14 +5,15 @@ set -euo pipefail
 # BST Benchmark Runner
 # ============================================================================
 # Usage:
-#   ./benchmark.sh [output_csv] [ops_per_thread] [key_space] [repeats]
+#   ./benchmark.sh [output_csv] [ops_per_thread] [key_space] [repeats] [work_iters]
 # Example:
-#   ./benchmark.sh results.csv 50000 2000 5
+#   ./benchmark.sh results.csv 50000 2000 5 500
 
 OUTPUT_CSV="${1:-results.csv}"
 OPS_PER_THREAD="${2:-50000}"
 KEY_SPACE="${3:-2000}"
 REPEATS="${4:-5}"
+WORK_ITERS="${5:-0}"
 
 THREADS=(1 2 4 8 16)
 
@@ -41,7 +42,7 @@ for bin in "${BINARIES[@]}"; do
       run=$((run + 1))
       echo -ne "\r  [$run/$total_runs] $bin  threads=$t  rep=$rep    "
 
-      line=$($bin benchmark "$t" "$OPS_PER_THREAD" "$KEY_SPACE")
+      line=$($bin benchmark "$t" "$OPS_PER_THREAD" "$KEY_SPACE" "$WORK_ITERS")
 
       # Parse key=value output into CSV row
       echo "$line" | awk -v rep="$rep" '

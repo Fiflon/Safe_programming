@@ -31,7 +31,7 @@ VARIANT_ORDER = ["singleLock", "handOver", "lockFree"]
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="BST benchmark charts")
-    p.add_argument("--input", default="results.csv", help="Input CSV file")
+    p.add_argument("--input", default="results_work.csv", help="Input CSV file")
     p.add_argument("--out-dir", default="plots", help="Output directory for PNGs")
     return p.parse_args()
 
@@ -73,7 +73,7 @@ def plot_throughput(agg: pd.DataFrame, out: Path) -> None:
     ax.set_title("Throughput vs Number of Threads")
     ax.set_xlabel("Threads")
     ax.set_ylabel("Throughput  [Mops/s]")
-    ax.set_xscale("log", base=2)
+    # ax.set_xscale("log", base=2)
     ax.set_xticks(sorted(agg["threads"].unique()))
     ax.get_xaxis().set_major_formatter(plt.ScalarFormatter())
     ax.grid(True, linestyle="--", alpha=0.4)
@@ -106,7 +106,7 @@ def plot_latency(agg: pd.DataFrame, out: Path) -> None:
     ax.set_title("Total Execution Time vs Number of Threads")
     ax.set_xlabel("Threads")
     ax.set_ylabel("Execution time  [ms]")
-    ax.set_xscale("log", base=2)
+    # ax.set_xscale("log", base=2)
     ax.set_xticks(sorted(agg["threads"].unique()))
     ax.get_xaxis().set_major_formatter(plt.ScalarFormatter())
     ax.grid(True, linestyle="--", alpha=0.4)
@@ -147,7 +147,7 @@ def plot_speedup(agg: pd.DataFrame, out: Path) -> None:
     ax.set_title("Speedup vs Number of Threads  (relative to 1 thread of same variant)")
     ax.set_xlabel("Threads")
     ax.set_ylabel("Speedup  (×)")
-    ax.set_xscale("log", base=2)
+    # ax.set_xscale("log", base=2)
     ax.set_xticks(sorted(agg["threads"].unique()))
     ax.get_xaxis().set_major_formatter(plt.ScalarFormatter())
     ax.grid(True, linestyle="--", alpha=0.4)
