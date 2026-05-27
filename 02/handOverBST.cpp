@@ -1,10 +1,3 @@
-// Hand-over-hand (lock-coupling) Binary Search Tree.
-// Each node owns its own std::mutex. Traversals lock at most two nodes at a
-// time: the current node and its child, then release the parent before
-// descending further.
-//
-// Build: g++ -std=c++20 -pthread -O2 handOverBST.cpp -o handOverBST
-
 #include <algorithm>
 #include <barrier>
 #include <cassert>
@@ -17,9 +10,6 @@
 #include <unordered_set>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-// Simulated work
-// ---------------------------------------------------------------------------
 static volatile int workSink = 0;
 
 static void simulateWork(int iters) {
@@ -27,10 +17,6 @@ static void simulateWork(int iters) {
     for (int i = 0; i < iters; ++i) x = x * 7 + i;
     workSink = x;
 }
-
-// ---------------------------------------------------------------------------
-// Node
-// ---------------------------------------------------------------------------
 
 struct Node {
     int        key;
@@ -40,21 +26,10 @@ struct Node {
     explicit Node(int k) : key(k) {}
 };
 
-// ---------------------------------------------------------------------------
-// Hand-over-hand BST
-// ---------------------------------------------------------------------------
-//
-// A sentinel root node (key = INT_MAX) ensures every real key has a parent,
-// which simplifies the coupling logic (we never need to special-case an
-// empty tree or root replacement).
-
 class HandOverBST {
-    Node sentinel_{INT_MAX};   // always present; real keys are strictly less
+    Node sentinel_{INT_MAX};
 
 public:
-    // ------------------------------------------------------------------
-    // contains – read-only traversal with hand-over-hand locking
-    // ------------------------------------------------------------------
     bool contains(int key) {
         sentinel_.mtx.lock();
         Node* cur = (key < sentinel_.key) ? sentinel_.left : sentinel_.right;
@@ -73,7 +48,6 @@ public:
         }
     }
 
-    // contains with simulated work under LEAF lock only.
     bool containsWork(int key, int workIters) {
         sentinel_.mtx.lock();
         Node* cur = (key < sentinel_.key) ? sentinel_.left : sentinel_.right;
@@ -84,7 +58,7 @@ public:
 
         while (true) {
             if (key == cur->key) {
-                simulateWork(workIters);  // work under LEAF lock only!
+                simulateWork(workIters);
                 cur->mtx.unlock();
                 return true;
             }
@@ -96,9 +70,6 @@ public:
         }
     }
 
-    // ------------------------------------------------------------------
-    // insert – descend with coupling, then splice a new leaf
-    // ------------------------------------------------------------------
     bool insert(int key) {
         sentinel_.mtx.lock();
         Node** slot = (key < sentinel_.key)
@@ -119,7 +90,7 @@ public:
         while (true) {
             if (key == cur->key) {
                 cur->mtx.unlock();
-                return false;           // already present
+                return false;
             }
             Node** childSlot = (key < cur->key) ? &cur->left : &cur->right;
             if (!*childSlot) {
@@ -134,9 +105,6 @@ public:
         }
     }
 
-    // ------------------------------------------------------------------
-    // remove – coupling keeps parent + child locked so we can re-link
-    // ------------------------------------------------------------------
     bool remove(int key) {
         sentinel_.mtx.lock();
         Node** parentSlot = (key < sentinel_.key)
@@ -147,10 +115,9 @@ public:
 
         Node* parent   = &sentinel_;
         Node* cur      = *parentSlot;
-        Node** curSlot = parentSlot;          // *curSlot == cur
+        Node** curSlot = parentSlot;
         cur->mtx.lock();
 
-        // Descend with coupling until we find the key or a dead end.
         while (cur->key != key) {
             Node** childSlot = (key < cur->key) ? &cur->left : &cur->right;
             if (!*childSlot) {
@@ -166,15 +133,11 @@ public:
             cur     = next;
         }
 
-        // cur holds the key; parent and cur are both locked.
         removeNode(parent, curSlot, cur);
         return true;
     }
 
 private:
-    // Remove *cur* whose address in its parent's left/right is *slot*.
-    // Caller must hold parent->mtx AND cur->mtx; this function unlocks both
-    // (and any additionally locked successor).
     static void removeNode(Node* parent, Node** slot, Node* cur) {
         if (!cur->left) {
             *slot = cur->right;
@@ -187,8 +150,6 @@ private:
             parent->mtx.unlock();
             delete cur;
         } else {
-            // Two children: find in-order successor (leftmost in right subtree).
-            // We need to lock the successor path with hand-over-hand too.
             Node* succParent = cur;
             Node* succ       = cur->right;
             succ->mtx.lock();
@@ -198,14 +159,12 @@ private:
                 Node* next = succ->left;
                 next->mtx.lock();
                 succParent->mtx.unlock();
-                // But keep cur locked – we will modify cur->key.
                 if (succParent != cur) { /* already unlocked above */ }
                 succParent = succ;
                 succSlot   = &succ->left;
                 succ       = next;
             }
 
-            // Copy successor key into cur, then unlink successor.
             cur->key = succ->key;
             *succSlot = succ->right;
 
@@ -217,10 +176,6 @@ private:
         }
     }
 };
-
-// ===========================================================================
-// Tests (same scenarios as the other BST variants)
-// ===========================================================================
 
 namespace test {
 
@@ -245,7 +200,6 @@ void concurrentStress() {
     constexpr int KEY_SPACE = 2000;
 
     HandOverBST tree;
-    // Shuffle keys to avoid degenerate linear tree (sequential insert → O(n) depth).
     std::vector<int> keys;
     for (int k = 0; k < KEY_SPACE; k += 2) keys.push_back(k);
     std::mt19937 prepopRng(42);
@@ -289,10 +243,6 @@ void concurrentStress() {
 }
 
 } // namespace test
-
-// ===========================================================================
-// Benchmark harness
-// ===========================================================================
 
 void runBenchmark(int threads, int opsPerThread, int keySpace, int workIters) {
     HandOverBST tree;

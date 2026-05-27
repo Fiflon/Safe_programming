@@ -1,34 +1,3 @@
-// Non-blocking leaf-oriented Binary Search Tree.
-// Reference: F. Ellen, P. Fatourou, E. Ruppert, F. van Breugel,
-//            "Non-blocking Binary Search Trees", PODC 2010.
-//
-// Build: g++ -std=c++20 -pthread -O2 BST.cpp -o BST
-//
-// Design summary
-// --------------
-// Leaf-oriented BST: keys live only in leaves; internal nodes are routers
-// with splitKey K (left subtree has keys < K, right subtree has keys >= K).
-// A sentinel root with two sentinel leaves (INT_MAX-1, INT_MAX) keeps the
-// tree non-empty so insert/delete always have a real parent / grandparent.
-//
-// Synchronisation: every InternalNode owns one std::atomic<uintptr_t> "update"
-// holding a *tagged pointer*: low 2 bits encode a state, the rest points to
-// an Info record describing the in-flight update.
-//
-//   CLEAN = 0   no update in progress
-//   DFLAG = 1   a Delete has flagged this node (it is the grandparent)
-//   IFLAG = 2   an Insert has flagged this node (it is the parent)
-//   MARK  = 3   this node is being / has been removed (permanent)
-//
-// All non-trivial state changes use compare_exchange_strong with
-// memory_order_seq_cst. No mutex / no spin lock anywhere.
-//
-// Helping: a thread that finds a non-CLEAN update on its way runs the
-// remaining steps of that update (idempotent helpInsert / helpDelete /
-// helpMarked) before retrying; this is what gives global lock-freedom.
-//
-// Memory reclamation is intentionally omitted (proof of concept).
-
 #include <algorithm>
 #include <atomic>
 #include <barrier>
@@ -44,17 +13,6 @@
 #include <thread>
 #include <unordered_set>
 #include <vector>
-
-// ---------------------------------------------------------------------------
-// Tracing
-// ---------------------------------------------------------------------------
-//
-//  Compile with -DBST_TRACE=1   -> every insert/remove/help logs a line.
-//  Compile with -DBST_TRACE=2   -> additionally logs every CAS attempt.
-//  Default (no -D)              -> silent (zero overhead).
-//
-// Logging is serialised via a single mutex around std::cout so lines from
-// different threads do not interleave inside one event.
 #ifndef BST_TRACE
 #define BST_TRACE 0
 #endif
@@ -81,9 +39,6 @@ inline std::string tidStr() {
 #  define LOG2(msg) do {} while (0)
 #endif
 
-// ---------------------------------------------------------------------------
-// Simulated work
-// ---------------------------------------------------------------------------
 static volatile int workSink = 0;
 
 static void simulateWork(int iters) {
@@ -92,9 +47,6 @@ static void simulateWork(int iters) {
     workSink = x;
 }
 
-// ---------------------------------------------------------------------------
-// Node hierarchy
-// ---------------------------------------------------------------------------
 
 struct Node {
     const bool isLeaf;
@@ -109,23 +61,19 @@ struct Leaf : Node {
 
 struct InternalNode;
 
-// ---------------------------------------------------------------------------
-// Info records (one per in-flight update)
-// ---------------------------------------------------------------------------
-
 struct alignas(4) Info { virtual ~Info() = default; };
 
 struct InsertInfo : Info {
-    InternalNode* p;             // parent that will be flagged
-    InternalNode* newInternal;   // new sub-tree to splice in
-    Node*         l;             // existing leaf to replace
+    InternalNode* p; // parent 
+    InternalNode* newInternal; // new sub-tree to add
+    Node*         l; // existing leaf to replace
 };
 
 struct DeleteInfo : Info {
-    InternalNode* gp;            // grandparent that will be flagged
-    InternalNode* p;             // parent that will be marked
-    Node*         l;             // leaf carrying the key to delete
-    uintptr_t     pupdate;       // observed value of p->update at search time
+    InternalNode* gp; // grandparent 
+    InternalNode* p; // parent
+    Node*         l; // leaf carrying the key to delete
+    uintptr_t     pupdate; // observed value p->update AT SEARCH TIME
 };
 
 static_assert(alignof(Info) >= 4,
@@ -134,10 +82,6 @@ static_assert((alignof(InsertInfo) & uintptr_t(0x3)) == 0,
               "InsertInfo alignment must keep low tag bits clear");
 static_assert((alignof(DeleteInfo) & uintptr_t(0x3)) == 0,
               "DeleteInfo alignment must keep low tag bits clear");
-
-// ---------------------------------------------------------------------------
-// Tagged pointer helpers (low 2 bits of update store the state)
-// ---------------------------------------------------------------------------
 
 enum : uintptr_t {
     CLEAN      = 0,
@@ -158,10 +102,6 @@ static inline uintptr_t getState(uintptr_t u) {
     return u & STATE_MASK;
 }
 
-// ---------------------------------------------------------------------------
-// Internal node
-// ---------------------------------------------------------------------------
-
 struct InternalNode : Node {
     std::atomic<Node*>     left;
     std::atomic<Node*>     right;
@@ -171,26 +111,20 @@ struct InternalNode : Node {
         : Node(false, k), left(l), right(r), update(CLEAN) {}
 };
 
-// ---------------------------------------------------------------------------
-// Lock-free BST
-// ---------------------------------------------------------------------------
-
 class LockFreeBST {
-    // Real keys must be strictly smaller than INF1.
     static constexpr int INF1 = INT_MAX - 1;
     static constexpr int INF2 = INT_MAX;
 
     InternalNode* root;
 
     struct SearchRes {
-        InternalNode* gp;        // grandparent of l (may be nullptr)
-        InternalNode* p;         // parent of l
-        Node*         l;         // leaf reached
-        uintptr_t     pupdate;   // p->update observed during traversal
-        uintptr_t     gpupdate;  // gp->update observed during traversal
+        InternalNode* gp; // grandparent 
+        InternalNode* p; // parent
+        Node*         l; // leaf reached
+        uintptr_t     pupdate;   // p->update observed 
+        uintptr_t     gpupdate;  // gp->update observed
     };
 
-    // Wait-free traversal. Reads only; ignores flags / marks (paper §4).
     SearchRes search(int key) const {
         InternalNode* gp = nullptr;
         InternalNode* p  = nullptr;
@@ -208,9 +142,6 @@ class LockFreeBST {
         return {gp, p, l, pupdate, gpupdate};
     }
 
-    // CAS one of parent's children from oldChild to newChild.
-    // At the moment a write to update is in flight, exactly one of
-    // left/right equals oldChild; the other CAS harmlessly fails.
     static void casChild(InternalNode* parent, Node* oldChild, Node* newChild) {
         Node* expL = oldChild;
         if (parent->left.compare_exchange_strong(expL, newChild,
@@ -220,8 +151,6 @@ class LockFreeBST {
         parent->right.compare_exchange_strong(expR, newChild,
                                               std::memory_order_seq_cst);
     }
-
-    // ---- Helpers (idempotent) --------------------------------------------
 
     void helpInsert(InsertInfo* op) {
         casChild(op->p, op->l, op->newInternal);
@@ -240,8 +169,7 @@ class LockFreeBST {
                                                std::memory_order_seq_cst);
     }
 
-    // Returns true if the delete is guaranteed to complete (parent marked
-    // either by us or a helper). Returns false if we must back off and retry.
+    // Returns true if the delete is guaranteed to complete 
     bool helpDelete(DeleteInfo* op) {
         uintptr_t expected = op->pupdate;
         uintptr_t marked   = pack(op, MARK);
@@ -251,7 +179,6 @@ class LockFreeBST {
             helpMarked(op);
             return true;
         }
-        // Mark failed: another op holds p. Help it, then release gp.
         help(expected);
         uintptr_t dflagged = pack(op, DFLAG);
         op->gp->update.compare_exchange_strong(dflagged, CLEAN,
@@ -265,7 +192,7 @@ class LockFreeBST {
             case IFLAG: helpInsert(static_cast<InsertInfo*>(info)); break;
             case MARK : helpMarked(static_cast<DeleteInfo*>(info)); break;
             case DFLAG: helpDelete(static_cast<DeleteInfo*>(info)); break;
-            default: break;  // CLEAN: nothing to do
+            default: break;
         }
     }
 
@@ -273,34 +200,29 @@ public:
     LockFreeBST() {
         Leaf* inf1 = new Leaf(INF1);
         Leaf* inf2 = new Leaf(INF2);
-        // splitKey = INF2: every real key < INF1 < INF2 routes left.
         root = new InternalNode(INF2, inf1, inf2);
     }
 
-    // Wait-free.
     bool contains(int key) const {
         SearchRes r = search(key);
         return r.l->key == key && key < INF1;
     }
 
-    // Wait-free, with simulated work (no lock held).
     bool containsWork(int key, int workIters) const {
         SearchRes r = search(key);
         bool found = r.l->key == key && key < INF1;
-        if (found) simulateWork(workIters);  // no lock held!
+        if (found) simulateWork(workIters);
         return found;
     }
 
-    // Lock-free.
     bool insert(int key) {
         while (true) {
             SearchRes r = search(key);
-            if (r.l->key == key) return false;       // key already present
+            if (r.l->key == key) return false;
             if (getState(r.pupdate) != CLEAN) {
                 help(r.pupdate);
                 continue;
             }
-            // Build the three new nodes.
             Leaf* newLeaf      = new Leaf(key);
             Leaf* oldLeafClone = new Leaf(r.l->key);
             InternalNode* newInt;
@@ -316,20 +238,18 @@ public:
             uintptr_t flagged  = pack(op, IFLAG);
             if (r.p->update.compare_exchange_strong(
                     expected, flagged, std::memory_order_seq_cst)) {
-                helpInsert(op);                       // swing + un-flag
+                helpInsert(op);
                 return true;
             }
-            // Flag failed: another op intervened on p. Help it and retry.
             help(expected);
         }
     }
 
-    // Lock-free.
     bool remove(int key) {
         while (true) {
             SearchRes r = search(key);
-            if (r.l->key != key) return false;        // key not present
-            if (r.gp == nullptr)  return false;       // refuse to touch sentinels
+            if (r.l->key != key) return false;
+            if (r.gp == nullptr)  return false;
             if (getState(r.gpupdate) != CLEAN) { help(r.gpupdate); continue; }
             if (getState(r.pupdate)  != CLEAN) { help(r.pupdate);  continue; }
 
@@ -341,18 +261,14 @@ public:
             uintptr_t flagged  = pack(op, DFLAG);
             if (r.gp->update.compare_exchange_strong(
                     expected, flagged, std::memory_order_seq_cst)) {
-                if (helpDelete(op)) return true;      // mark + splice succeeded
-                // mark failed: helpDelete already cleaned gp; loop retries.
+                if (helpDelete(op)) return true;
+                // helpDelete already cleaned gp. Retry
             } else {
                 help(expected);
             }
         }
     }
 };
-
-// ===========================================================================
-// Tests
-// ===========================================================================
 
 namespace test {
 
@@ -378,7 +294,6 @@ void concurrentStress() {
 
     LockFreeBST tree;
 
-    // Shuffle keys to avoid degenerate linear tree.
     std::vector<int> keys;
     for (int k = 0; k < KEY_SPACE; k += 2) keys.push_back(k);
     std::mt19937 prepopRng(42);
@@ -422,10 +337,6 @@ void concurrentStress() {
 }
 
 } // namespace test
-
-// ===========================================================================
-// Benchmark harness
-// ===========================================================================
 
 void runBenchmark(int threads, int opsPerThread, int keySpace, int workIters) {
     LockFreeBST tree;
@@ -486,82 +397,3 @@ int main(int argc, char* argv[]) {
     }
     return 0;
 }
-
-// ===========================================================================
-// Non-blocking proof (lock-freedom)
-// ===========================================================================
-//
-// Claim. In every infinite execution of the algorithm above, infinitely many
-// operations complete. Equivalently: no thread can starve the system on its
-// own — for every failed CAS there is a corresponding successful CAS by some
-// other thread.
-//
-// (1) Search is wait-free.
-//     `search()` performs only `load`s along a root-to-leaf path. No CAS, no
-//     retry loop. Each iteration descends one level, terminating in O(h)
-//     steps where h is the height observed during the walk.
-//
-// (2) Once an Insert successfully flags its parent, it finishes in O(1).
-//     The flag CAS in `insert()` (line: `r.p->update.cmpx(...,flagged)`)
-//     publishes the InsertInfo. From there `helpInsert` performs at most
-//     2 CASes (`casChild` + un-flag), neither of which can be defeated:
-//       * `casChild` either wins or finds the child already swung by a
-//         helper (idempotent — both calls store the same newInternal).
-//       * The un-flag CAS targets exactly the value we wrote; if it fails
-//         it is because a helper already restored CLEAN, which is fine.
-//
-// (3) Once a Delete successfully flags its grandparent AND marks its parent,
-//     it finishes in O(1). Same reasoning as (2) but with `helpMarked`:
-//     at most 2 CASes (`casChild` on gp + un-flag gp), both idempotent.
-//
-// (4) A failed CAS implies another CAS succeeded.
-//     There are exactly four CAS sites:
-//        (a) flag-parent in `insert`,
-//        (b) flag-grandparent in `remove`,
-//        (c) mark-parent in `helpDelete`,
-//        (d) child swing + un-flag in helpers.
-//     A CAS on `update` fails iff the field changed since we read it, i.e.
-//     some other thread wrote it — and writes to `update` only happen via
-//     successful CASes from this set. A `casChild` failure means another
-//     thread (helper of the same op) already swung the child. So every CAS
-//     failure is paired with a successful CAS by a different operation.
-//
-// (5) Helping converts other threads' progress into our own.
-//     Whenever `insert` / `remove` / `helpDelete` observes a non-CLEAN
-//     update or a CAS failure, it calls `help(u)` BEFORE retrying. By (2)
-//     and (3) the helped op completes in finitely many steps, after which
-//     our retry sees CLEAN. This rules out two threads endlessly
-//     invalidating each other.
-//
-// (6) The lowest pending Delete makes progress.
-//     A Delete can fail twice — once on flag (resolved by helping per (5))
-//     and once on mark, after which it cleans gp up and retries. Suppose
-//     for contradiction infinitely many Deletes start and none finishes.
-//     Take the Delete D operating on the deepest pair (gp, p) among all
-//     currently-flagged Deletes. Any conflicting op on p must be an op
-//     strictly above D; once those finitely many ops are helped to
-//     completion, D's mark CAS on p succeeds (no one else can flip p's
-//     update from CLEAN because gp is DFLAG-locked). Thus D completes —
-//     contradiction.
-//
-// (7) Conclusion.
-//     Every CAS failure ⇒ a CAS by another op succeeded (4). Every
-//     successful CAS — except a Delete-flag that later aborts — is one of
-//     finitely many steps to completion (2,3); the abort case is bounded
-//     by (6). Hence in any infinite execution, infinitely many ops
-//     complete: the data structure is lock-free.
-//
-// Linearization points
-// --------------------
-// * contains(k):    successful   — load of the matching leaf in `search`.
-//                   unsuccessful — load of the mismatching leaf.
-// * insert(k):      successful   — successful child-swing CAS in
-//                                  helpInsert (`casChild`); k becomes
-//                                  reachable from root at that instant.
-//                   unsuccessful (k present) — load of the leaf with
-//                                  key == k in `search`.
-// * remove(k):      successful   — successful child-swing CAS in
-//                                  helpMarked (`casChild` on gp); k stops
-//                                  being reachable from root at that
-//                                  instant.
-//                   unsuccessful (k absent) — load of the leaf in `search`.
